@@ -1,0 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // or your preferred database
+  url      = env("DATABASE_URL")
+}
+
+// 1. Core model for AUTHENTICATION (for NextAuth)
+// A User can be an admin for a Company, an admin for a Cabinet, or a Collaborator within a Cabinet.
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String   // Hashed password
+  role      Role // Defines what the user IS and WHAT THEY CAN DO
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A user can be the primary contact/admin for ONE company.
+  companyAdmin   Company? @relation("CompanyAdmin")
+
+  // OR a user can be the primary contact/admin for ONE cabinet.
+  cabinetAdmin   Cabinet? @relation("CabinetAdmin")
+
+  // OR a user can be a collaborator belonging to ONE cabinet.
+  collaboratorOfId String?
+  collaboratorOf   Cabinet? @relation("CabinetCollaborators", fields: [collaboratorOfId], references: [id])
+
+  // NextAuth Session model relation
+  sessions Session[]
+
+  @@index([collaboratorOfId])
+}
+
+// 2. Company Profile/Organization
+// This entity holds data about the company itself.
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A Company has ONE admin user. This links the profile to the login credentials.
+  adminId String  @unique
+  admin   User    @relation("CompanyAdmin", fields: [adminId], references: [id])
+
+  // Many-to-many relationship with Cabinet
+  cabinets CompanyCabinet[]
+
+  // Documents uploaded BY this company
+  documents Document[]
+}
+
+// 3. Cabinet Profile/Organization
+// This entity holds data about the cabinet itself.
+model Cabinet {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A Cabinet has ONE admin user. This links the profile to the login credentials.
+  adminId String  @unique
+  admin   User    @relation("CabinetAdmin", fields: [adminId], references: [id])
+
+  // A Cabinet has MANY collaborators (who are Users).
+  collaborators User[] @relation("CabinetCollaborators")
+
+  // Many-to-many relationship with Company
+  companies CompanyCabinet[]
+}
+
+// 4. Join Table for the Many-to-Many relationship
+model CompanyCabinet {
+  companyId String
+  cabinetId String
+  assignedAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+  cabinet Cabinet @relation(fields: [cabinetId], references: [id])
+
+  @@id([companyId, cabinetId]) // Defines a composite primary key
+}
+
+// 5. Document model
+model Document {
+  id        String   @id @default(cuid())
+  title     String
+  fileUrl   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A document belongs to ONE company.
+  // Access for cabinets will be determined by checking the CompanyCabinet table.
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+}
+
+
+// Model required by NextAuth for session management
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Enum for defining user roles clearly
+enum Role {
+  COMPANY_ADMIN  // Manages a Company account
+  CABINET_ADMIN  // Manages a Cabinet and its collaborators
+  COLLABORATOR   // A user invited to a Cabinet by a CABINET_ADMIN
+}
