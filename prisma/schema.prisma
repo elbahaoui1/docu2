@@ -1,0 +1,158 @@
+// /prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // or your database of choice
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum AccountType {
+  COMPANY
+  CABINET
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  password      String
+  accountType   AccountType
+  role          UserRole? // Nullable, as CompanyUser won't have a role
+
+  // Timestamps for NextAuth
+  emailVerified DateTime?
+  image         String?
+
+  // Company or Cabinet linkage
+  companyId     String?         @unique // A user can only be linked to one company
+  company       Company?        @relation(fields: [companyId], references: [id])
+  cabinetId     String?
+  cabinet       Cabinet?        @relation(fields: [cabinetId], references: [id])
+
+  // NextAuth relations
+  accounts      Account[]
+  sessions      Session[]
+  passwordResetTokens PasswordResetToken[]
+  groupMemberships     GroupMember[]
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  user      User?    // One-to-one with User
+  cabinets  CompanyCabinet[]
+  documents Document[]
+}
+
+
+
+// Explicit many-to-many relation table
+model CompanyCabinet {
+  companyId String
+  cabinetId String
+  company   Company @relation(fields: [companyId], references: [id])
+  cabinet   Cabinet @relation(fields: [cabinetId], references: [id])
+
+  @@id([companyId, cabinetId])
+}
+
+model Document {
+  id        String  @id @default(cuid())
+  title     String
+  fileUrl   String
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+}
+
+
+// --- NextAuth.js Models ---
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+/// Token used for password reset flow
+model PasswordResetToken {
+  id      String   @id @default(cuid())
+  userId  String
+  token   String   @unique
+  expires DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model CabinetInvitation {
+  id        String   @id @default(cuid())
+  email     String   // Email of the person being invited
+  token     String   @unique
+  expires   DateTime // When the invitation expires
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+
+  @@unique([email, cabinetId]) // Prevent duplicate invitations to the same cabinet
+}
+
+// Add the inverse relation to your Cabinet model
+model Cabinet {
+  id          String              @id @default(cuid())
+  name        String
+  users       User[]
+  companies   CompanyCabinet[]
+  invitations CabinetInvitation[] // Add this line
+  groups      Group[]
+}
+
+model Group {
+  id        String   @id @default(cuid())
+  name      String
+  cabinetId String
+  cabinet   Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  members   GroupMember[]
+
+  @@unique([cabinetId, name])
+}
+
+model GroupMember {
+  groupId String
+  userId  String
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+}
